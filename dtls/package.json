@@ -1,0 +1,27 @@
+{
+  "name": "dtls13-node",
+  "version": "0.2.0-phase2",
+  "private": true,
+  "description": "Pure Node.js DTLS 1.3 implementation (RFC 9147). Zero external dependencies.",
+  "main": "server.js",
+  "scripts": {
+    "server": "node server.js",
+    "client": "node client.js",
+    "server:trace": "DTLS_LOG_LEVEL=TRACE node server.js",
+    "client:trace": "DTLS_LOG_LEVEL=TRACE node client.js",
+    "server:nocookie": "DTLS_COOKIE=0 node server.js",
+    "openssl:server": "bash scripts/openssl-server.sh",
+    "openssl:client": "bash scripts/openssl-client.sh",
+    "certs": "bash scripts/gen-certs.sh",
+    "selftest": "node selftest.js",
+    "test": "node tests/test-kat.js && node tests/test-unit.js && node tests/test-e2e.js && node tests/test-robustness.js",
+    "test:kat": "node tests/test-kat.js",
+    "test:unit": "node tests/test-unit.js",
+    "test:e2e": "node tests/test-e2e.js",
+    "test:robust": "node tests/test-robustness.js",
+    "smoke": "node -e \"['./src/constants','./src/logger','./src/record','./src/handshake','./src/extensions','./src/transport','./src/hkdf','./src/cipher-suite','./src/transcript','./src/ecdhe','./src/key-schedule','./src/aead','./src/cookie'].forEach(m=>require(m)); console.log('✓ all 13 modules load')\""
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
