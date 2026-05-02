@@ -34,9 +34,11 @@ function protectRecordV2({
 
   const inner = buildInnerPlaintext(contentType, content, paddingLen);
 
-  // DTLS 1.3: 64-bit nonce = (epoch << 48) | recordSeq
-  const full64Seq = (BigInt(epoch) << 48n) | BigInt(recordSeq);
-  const nonce = buildAeadNonce(writeIv, full64Seq);
+  // RFC 9147 §4.2.3: per-record AEAD nonce uses the 48-bit record sequence
+  // number ONLY (left-padded to iv_length, XORed with static IV). Unlike
+  // DTLS 1.2, the epoch is NOT part of the nonce — epoch is implicit in the
+  // keys (each epoch derives its own key/iv from a different traffic_secret).
+  const nonce = buildAeadNonce(writeIv, recordSeq);
 
   const ctLen = inner.length + 16; // plaintext + AEAD tag
   const lenBuf = Buffer.alloc(2);
@@ -148,9 +150,11 @@ function unprotectRecord({
   }
   const aad = Buffer.concat(aadParts);
 
-  // --- Adım 6: Nonce = IV XOR (epoch << 48 | fullSeq) ---
-  const full64Seq = (BigInt(epoch) << 48n) | BigInt(fullSeq);
-  const nonce = buildAeadNonce(readIv, full64Seq);
+  // --- Adım 6: Nonce = IV XOR pad12(fullSeq) ---
+  // RFC 9147 §4.2.3: only the 48-bit record sequence number goes into the
+  // AEAD nonce — the epoch is NOT included (it is implicit in the key/iv,
+  // selected per epoch). This is THE difference from DTLS 1.2.
+  const nonce = buildAeadNonce(readIv, fullSeq);
 
   // --- Adım 7-8: AEAD aç, inner plaintext'i parse et ---
   let inner;
