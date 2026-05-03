@@ -44,7 +44,14 @@
 
 const {
   hkdfExtract, hkdfExpandLabel, deriveSecret, hashEmpty,
+  TLS13_LABEL_PREFIX, DTLS13_LABEL_PREFIX,
 } = require('./hkdf.js');
+
+// RFC 9147 §5.9 / interop reality: in DTLS 1.3, the AEAD key material
+// (key, iv, sn, finished, traffic upd) is derived with the "dtls13" HKDF
+// prefix in both wolfSSL and OpenSSL. Traffic secrets via Derive-Secret
+// keep "tls13 " in those implementations as well.
+const KM_PREFIX = DTLS13_LABEL_PREFIX;
 
 // --------------------------------------------------------------------------
 // Early Secret
@@ -104,26 +111,31 @@ function resumptionMasterSecret(hash, masterS, transcriptCH_CF) {
 // --------------------------------------------------------------------------
 // Traffic secret -> key/iv/sn
 // --------------------------------------------------------------------------
-function trafficKeyIv(hash, trafficSecret, { keyLen, ivLen }) {
+// trafficKeyIv / snKey / finishedKey / updateTrafficSecret all take an
+// optional `prefix` arg so RFC 8448 (TLS 1.3) KAT tests can still call them
+// directly with the "tls13 " default. The high-level deriveHandshakeStage /
+// deriveApplicationStage helpers pass DTLS13_LABEL_PREFIX so the live DTLS
+// 1.3 protocol uses the "dtls13" prefix that wolfSSL/OpenSSL expect.
+function trafficKeyIv(hash, trafficSecret, { keyLen, ivLen }, prefix = TLS13_LABEL_PREFIX) {
   return {
-    key: hkdfExpandLabel(hash, trafficSecret, 'key', Buffer.alloc(0), keyLen),
-    iv:  hkdfExpandLabel(hash, trafficSecret, 'iv',  Buffer.alloc(0), ivLen),
+    key: hkdfExpandLabel(hash, trafficSecret, 'key', Buffer.alloc(0), keyLen, prefix),
+    iv:  hkdfExpandLabel(hash, trafficSecret, 'iv',  Buffer.alloc(0), ivLen, prefix),
   };
 }
 
 // RFC 9147 §4.2.3 — sequence number mask anahtarı sadece DTLS 1.3 özgüdür.
-function snKey(hash, trafficSecret, snKeyLen) {
-  return hkdfExpandLabel(hash, trafficSecret, 'sn', Buffer.alloc(0), snKeyLen);
+function snKey(hash, trafficSecret, snKeyLen, prefix = TLS13_LABEL_PREFIX) {
+  return hkdfExpandLabel(hash, trafficSecret, 'sn', Buffer.alloc(0), snKeyLen, prefix);
 }
 
 // Finished key
-function finishedKey(hash, baseKey, hashLen) {
-  return hkdfExpandLabel(hash, baseKey, 'finished', Buffer.alloc(0), hashLen);
+function finishedKey(hash, baseKey, hashLen, prefix = TLS13_LABEL_PREFIX) {
+  return hkdfExpandLabel(hash, baseKey, 'finished', Buffer.alloc(0), hashLen, prefix);
 }
 
 // KeyUpdate — yeni application traffic secret
-function updateTrafficSecret(hash, prevSecret, hashLen) {
-  return hkdfExpandLabel(hash, prevSecret, 'traffic upd', Buffer.alloc(0), hashLen);
+function updateTrafficSecret(hash, prevSecret, hashLen, prefix = TLS13_LABEL_PREFIX) {
+  return hkdfExpandLabel(hash, prevSecret, 'traffic upd', Buffer.alloc(0), hashLen, prefix);
 }
 
 // --------------------------------------------------------------------------
@@ -149,15 +161,15 @@ function deriveHandshakeStage({
     clientHandshakeSecret: cHS,
     serverHandshakeSecret: sHS,
     clientHandshake: {
-      ...trafficKeyIv(hash, cHS, { keyLen, ivLen }),
-      sn:           snKey(hash, cHS, sn_keyLen),
-      finishedKey:  finishedKey(hash, cHS, hLen),
+      ...trafficKeyIv(hash, cHS, { keyLen, ivLen }, KM_PREFIX),
+      sn:           snKey(hash, cHS, sn_keyLen, KM_PREFIX),
+      finishedKey:  finishedKey(hash, cHS, hLen, KM_PREFIX),
       trafficSecret: cHS,
     },
     serverHandshake: {
-      ...trafficKeyIv(hash, sHS, { keyLen, ivLen }),
-      sn:           snKey(hash, sHS, sn_keyLen),
-      finishedKey:  finishedKey(hash, sHS, hLen),
+      ...trafficKeyIv(hash, sHS, { keyLen, ivLen }, KM_PREFIX),
+      sn:           snKey(hash, sHS, sn_keyLen, KM_PREFIX),
+      finishedKey:  finishedKey(hash, sHS, hLen, KM_PREFIX),
       trafficSecret: sHS,
     },
   };
@@ -175,13 +187,13 @@ function deriveApplicationStage({ suite, handshakeSecret, transcriptCH_SF }) {
     masterSecret: master,
     exporterSecret: exp,
     clientApplication: {
-      ...trafficKeyIv(hash, cAP, { keyLen, ivLen }),
-      sn:           snKey(hash, cAP, sn_keyLen),
+      ...trafficKeyIv(hash, cAP, { keyLen, ivLen }, KM_PREFIX),
+      sn:           snKey(hash, cAP, sn_keyLen, KM_PREFIX),
       trafficSecret: cAP,
     },
     serverApplication: {
-      ...trafficKeyIv(hash, sAP, { keyLen, ivLen }),
-      sn:           snKey(hash, sAP, sn_keyLen),
+      ...trafficKeyIv(hash, sAP, { keyLen, ivLen }, KM_PREFIX),
+      sn:           snKey(hash, sAP, sn_keyLen, KM_PREFIX),
       trafficSecret: sAP,
     },
   };
