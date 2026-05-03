@@ -62,13 +62,20 @@ function hkdfExpand(hash, prk, info, length) {
 // label_full byte uzunluğu 7..255 arasında olmalı — TLS stack'larının tipik hatası:
 // uzun label kullanırken taşırma. Burada runtime kontrol var.
 // --------------------------------------------------------------------------
-const LABEL_PREFIX = Buffer.from('tls13 ', 'ascii');
+// RFC 8446 §7.1: TLS 1.3 prefix "tls13 " (with trailing space, 6 bytes).
+// RFC 9147 §5.9 / wolfSSL & OpenSSL behavior: AEAD key material in DTLS 1.3
+// (key, iv, sn, finished, traffic upd) is derived with prefix "dtls13"
+// (no trailing space, 6 bytes — same length so "<size> SHALL be inside one
+// hash iteration" property holds). Traffic secrets via Derive-Secret keep
+// the "tls13 " prefix in both wolfSSL and OpenSSL DTLS 1.3 implementations.
+const TLS13_LABEL_PREFIX  = Buffer.from('tls13 ', 'ascii');
+const DTLS13_LABEL_PREFIX = Buffer.from('dtls13', 'ascii');
 
-function buildHkdfLabel(length, label, context) {
+function buildHkdfLabel(length, label, context, prefix = TLS13_LABEL_PREFIX) {
   const labelBuf = typeof label === 'string' ? Buffer.from(label, 'ascii') : label;
   const ctxBuf   = context ? (Buffer.isBuffer(context) ? context : Buffer.from(context)) : Buffer.alloc(0);
 
-  const fullLabel = Buffer.concat([LABEL_PREFIX, labelBuf]);
+  const fullLabel = Buffer.concat([prefix, labelBuf]);
   if (fullLabel.length < 7 || fullLabel.length > 255) {
     throw new RangeError(`HkdfLabel.label length out of range: ${fullLabel.length}`);
   }
@@ -86,8 +93,8 @@ function buildHkdfLabel(length, label, context) {
   return out;
 }
 
-function hkdfExpandLabel(hash, secret, label, context, length) {
-  const info = buildHkdfLabel(length, label, context);
+function hkdfExpandLabel(hash, secret, label, context, length, prefix = TLS13_LABEL_PREFIX) {
+  const info = buildHkdfLabel(length, label, context, prefix);
   return hkdfExpand(hash, secret, info, length);
 }
 
@@ -138,4 +145,6 @@ module.exports = {
   hashLen,
   hashEmpty,
   transcriptHash,
+  TLS13_LABEL_PREFIX,
+  DTLS13_LABEL_PREFIX,
 };
