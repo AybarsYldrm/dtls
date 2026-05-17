@@ -294,6 +294,17 @@ unprotectAt(datagram, offset) {
     return null;
   }
 
+
+  debugWire(dir, datagram) {
+    if (!process.env.DTLS_DEBUG_WIRE) return;
+    const b0 = datagram.length ? datagram.readUInt8(0) : -1;
+    this.emit('log', 'info', `[wire] ${dir}`, {
+      len: datagram.length,
+      b0_hex: b0 >= 0 ? `0x${b0.toString(16).padStart(2,'0')}` : null,
+      head_hex: datagram.subarray(0, Math.min(datagram.length, 32)).toString('hex'),
+    });
+  }
+
   // ========================================================================
   // SEND helpers
   // ========================================================================
@@ -302,6 +313,7 @@ unprotectAt(datagram, offset) {
     const rec = encodePlaintext({ type: contentType, epoch: 0, sequenceNumber: seq, fragment });
     this.sendSeq.set(0, seq + 1);
     this.recordFlightDatagram(rec);
+    this.debugWire('tx-plain', rec);
     return this.transport.send(rec, this.peer);
   }
 
@@ -322,6 +334,7 @@ unprotectAt(datagram, offset) {
     if (contentType === CONTENT_TYPE.HANDSHAKE || contentType === CONTENT_TYPE.ACK) {
       this.recordFlightDatagram(rec);
     }
+    this.debugWire('tx-protected', rec);
     return this.transport.send(rec, this.peer);
   }
 
