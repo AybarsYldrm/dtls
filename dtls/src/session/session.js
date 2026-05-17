@@ -42,8 +42,8 @@ const { buildAck, parseAck } = require('../record/ack.js');
 const { ReplayWindow } = require('../record/replay-window.js');
 const { buildKeyUpdate, parseKeyUpdate, advanceTrafficSecret } = require('../crypto/key-update.js');
 
-const MAX_MTU = 1400; // UDP payload güvenli sınır (IPv4 + IP opt + UDP + IPsec pad için güvenli)
-const HS_FRAG_BUDGET = MAX_MTU - 32;  // record hdr + AEAD tag + padding güvenlik
+const MAX_MTU = 1200; // İnternet üstü DTLS için muhafazakar UDP payload (QUIC benzeri güvenli değer)
+const HS_FRAG_BUDGET = MAX_MTU - 64;  // unified hdr + AEAD tag + olası CID/padding payı
 
 // ============================================================================
 // Session — client VE server için ortak. role="client" veya "server".
@@ -294,6 +294,17 @@ unprotectAt(datagram, offset) {
     return null;
   }
 
+
+  debugWire(dir, datagram) {
+    if (!process.env.DTLS_DEBUG_WIRE) return;
+    const b0 = datagram.length ? datagram.readUInt8(0) : -1;
+    this.emit('log', 'info', `[wire] ${dir}`, {
+      len: datagram.length,
+      b0_hex: b0 >= 0 ? `0x${b0.toString(16).padStart(2,'0')}` : null,
+      head_hex: datagram.subarray(0, Math.min(datagram.length, 32)).toString('hex'),
+    });
+  }
+
   // ========================================================================
   // SEND helpers
   // ========================================================================
@@ -302,6 +313,7 @@ unprotectAt(datagram, offset) {
     const rec = encodePlaintext({ type: contentType, epoch: 0, sequenceNumber: seq, fragment });
     this.sendSeq.set(0, seq + 1);
     this.recordFlightDatagram(rec);
+    this.debugWire('tx-plain', rec);
     return this.transport.send(rec, this.peer);
   }
 
@@ -322,6 +334,7 @@ unprotectAt(datagram, offset) {
     if (contentType === CONTENT_TYPE.HANDSHAKE || contentType === CONTENT_TYPE.ACK) {
       this.recordFlightDatagram(rec);
     }
+    this.debugWire('tx-protected', rec);
     return this.transport.send(rec, this.peer);
   }
 
@@ -334,7 +347,7 @@ unprotectAt(datagram, offset) {
     this.transcript?.appendDtls(fullWire);
 
     // Fragmentation
-    const fragBudget = Math.max(200, HS_FRAG_BUDGET - 32); // biraz güvenlik payı
+    const fragBudget = Math.max(256, HS_FRAG_BUDGET); // sertifika flight'ını küçük parçalara böl
     if (totalLen <= fragBudget) {
       // tek parça
       if (encrypted) await this.sendProtectedRecord(CONTENT_TYPE.HANDSHAKE, fullWire);
@@ -683,18 +696,31 @@ unprotectAt(datagram, offset) {
       const ch1HashT = new Transcript(suite.hash); ch1HashT.appendDtls(m.wire);
       this.ch1Hash = ch1HashT.digest();
 
-      const clientGroups = parse_supportedGroups(ch.extensions.find(e => e.type === EXT_TYPE.SUPPORTED_GROUPS).data);
-      this.chosenGroup = clientGroups.includes(NAMED_GROUP.X25519) ? NAMED_GROUP.X25519 :
-                         clientGroups.includes(NAMED_GROUP.SECP256R1) ? NAMED_GROUP.SECP256R1 : clientGroups[0];
+      this.chosenGroup = this.pickGroupFromCH(ch);
+      if (this.chosenGroup == null) {
+        return this.sendAlert(ALERT_LEVEL.FATAL, ALERT_DESC.HANDSHAKE_FAILURE, 'ortak named_group yok');
+      }
 
       const cookie = this.cookieMinter.mint(this.peer, this.ch1Hash);
+      const hasChosenShare = (() => {
+        const ksExt = ch.extensions.find(e => e.type === EXT_TYPE.KEY_SHARE);
+        if (!ksExt) return false;
+        const entries = parse_keyShareClient(ksExt.data);
+        return entries.some(e => e.group === this.chosenGroup);
+      })();
+
+      // OpenSSL DTLS 1.3, "cookie-only" HRR bekler: eğer client zaten seçilen grup için
+      // key_share gönderdiyse HRR içindeki key_share(selected_group) ile ikinci kez
+      // aynı grubu istemek ILLEGAL_PARAMETER ile düşebiliyor.
+      const hrrExtensions = [
+        ext_supportedVersionsServer(VERSION.DTLS_1_3),
+        ext_cookie(cookie),
+      ];
+      if (!hasChosenShare) hrrExtensions.push(ext_keyShareHRR(this.chosenGroup));
+
       const hrrBody = buildServerHello({
         cipherSuite: suite.id,
-        extensions: [
-          ext_supportedVersionsServer(VERSION.DTLS_1_3),
-          ext_cookie(cookie),
-          ext_keyShareHRR(this.chosenGroup),
-        ],
+        extensions: hrrExtensions,
         isHRR: true,
       });
       const hrrWire = rebuildSingleFragmentWire(HS_TYPE.SERVER_HELLO, 0, hrrBody);
