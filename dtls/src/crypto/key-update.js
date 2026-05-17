@@ -10,7 +10,7 @@
 // Ardından yeni key/iv/sn türet. DTLS'de epoch += 1.
 
 const { updateTrafficSecret, trafficKeyIv, snKey } = require('./key-schedule.js');
-const { DTLS13_LABEL_PREFIX } = require('./hkdf.js');
+const { TLS13_LABEL_PREFIX } = require('./hkdf.js');
 
 function buildKeyUpdate(requestUpdate = 0) {
   return Buffer.from([requestUpdate & 0x01]);
@@ -23,11 +23,11 @@ function advanceTrafficSecret({ suite, currentSecret }) {
   // DTLS 1.3: AEAD key material derivation uses "dtls13" HKDF prefix
   // (matches wolfSSL Tls13DeriveKey path); the "traffic upd" derivation
   // does as well so the next-epoch traffic_secret stays in sync with peers.
-  const newSecret = updateTrafficSecret(suite.hash, currentSecret, suite.hashLen, DTLS13_LABEL_PREFIX);
+  const newSecret = updateTrafficSecret(suite.hash, currentSecret, suite.hashLen, TLS13_LABEL_PREFIX);
   return {
     trafficSecret: newSecret,
-    ...trafficKeyIv(suite.hash, newSecret, { keyLen: suite.keyLen, ivLen: suite.ivLen }, DTLS13_LABEL_PREFIX),
-    sn: snKey(suite.hash, newSecret, suite.sn_keyLen, DTLS13_LABEL_PREFIX),
+    ...trafficKeyIv(suite.hash, newSecret, { keyLen: suite.keyLen, ivLen: suite.ivLen }, TLS13_LABEL_PREFIX),
+    sn: snKey(suite.hash, newSecret, suite.sn_keyLen, TLS13_LABEL_PREFIX),
   };
 }
 

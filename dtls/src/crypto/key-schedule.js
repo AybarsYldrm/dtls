@@ -44,14 +44,14 @@
 
 const {
   hkdfExtract, hkdfExpandLabel, deriveSecret, hashEmpty,
-  TLS13_LABEL_PREFIX, DTLS13_LABEL_PREFIX,
+  TLS13_LABEL_PREFIX,
 } = require('./hkdf.js');
 
 // RFC 9147 §5.9 / interop reality: in DTLS 1.3, the AEAD key material
 // (key, iv, sn, finished, traffic upd) is derived with the "dtls13" HKDF
 // prefix in both wolfSSL and OpenSSL. Traffic secrets via Derive-Secret
 // keep "tls13 " in those implementations as well.
-const KM_PREFIX = DTLS13_LABEL_PREFIX;
+const KM_PREFIX = TLS13_LABEL_PREFIX;
 
 // --------------------------------------------------------------------------
 // Early Secret
