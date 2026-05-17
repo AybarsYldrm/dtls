@@ -683,18 +683,31 @@ unprotectAt(datagram, offset) {
       const ch1HashT = new Transcript(suite.hash); ch1HashT.appendDtls(m.wire);
       this.ch1Hash = ch1HashT.digest();
 
-      const clientGroups = parse_supportedGroups(ch.extensions.find(e => e.type === EXT_TYPE.SUPPORTED_GROUPS).data);
-      this.chosenGroup = clientGroups.includes(NAMED_GROUP.X25519) ? NAMED_GROUP.X25519 :
-                         clientGroups.includes(NAMED_GROUP.SECP256R1) ? NAMED_GROUP.SECP256R1 : clientGroups[0];
+      this.chosenGroup = this.pickGroupFromCH(ch);
+      if (this.chosenGroup == null) {
+        return this.sendAlert(ALERT_LEVEL.FATAL, ALERT_DESC.HANDSHAKE_FAILURE, 'ortak named_group yok');
+      }
 
       const cookie = this.cookieMinter.mint(this.peer, this.ch1Hash);
+      const hasChosenShare = (() => {
+        const ksExt = ch.extensions.find(e => e.type === EXT_TYPE.KEY_SHARE);
+        if (!ksExt) return false;
+        const entries = parse_keyShareClient(ksExt.data);
+        return entries.some(e => e.group === this.chosenGroup);
+      })();
+
+      // OpenSSL DTLS 1.3, "cookie-only" HRR bekler: eğer client zaten seçilen grup için
+      // key_share gönderdiyse HRR içindeki key_share(selected_group) ile ikinci kez
+      // aynı grubu istemek ILLEGAL_PARAMETER ile düşebiliyor.
+      const hrrExtensions = [
+        ext_supportedVersionsServer(VERSION.DTLS_1_3),
+        ext_cookie(cookie),
+      ];
+      if (!hasChosenShare) hrrExtensions.push(ext_keyShareHRR(this.chosenGroup));
+
       const hrrBody = buildServerHello({
         cipherSuite: suite.id,
-        extensions: [
-          ext_supportedVersionsServer(VERSION.DTLS_1_3),
-          ext_cookie(cookie),
-          ext_keyShareHRR(this.chosenGroup),
-        ],
+        extensions: hrrExtensions,
         isHRR: true,
       });
       const hrrWire = rebuildSingleFragmentWire(HS_TYPE.SERVER_HELLO, 0, hrrBody);
