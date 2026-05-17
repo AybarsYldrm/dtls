@@ -42,8 +42,8 @@ const { buildAck, parseAck } = require('../record/ack.js');
 const { ReplayWindow } = require('../record/replay-window.js');
 const { buildKeyUpdate, parseKeyUpdate, advanceTrafficSecret } = require('../crypto/key-update.js');
 
-const MAX_MTU = 1400; // UDP payload güvenli sınır (IPv4 + IP opt + UDP + IPsec pad için güvenli)
-const HS_FRAG_BUDGET = MAX_MTU - 32;  // record hdr + AEAD tag + padding güvenlik
+const MAX_MTU = 1200; // İnternet üstü DTLS için muhafazakar UDP payload (QUIC benzeri güvenli değer)
+const HS_FRAG_BUDGET = MAX_MTU - 64;  // unified hdr + AEAD tag + olası CID/padding payı
 
 // ============================================================================
 // Session — client VE server için ortak. role="client" veya "server".
@@ -334,7 +334,7 @@ unprotectAt(datagram, offset) {
     this.transcript?.appendDtls(fullWire);
 
     // Fragmentation
-    const fragBudget = Math.max(200, HS_FRAG_BUDGET - 32); // biraz güvenlik payı
+    const fragBudget = Math.max(256, HS_FRAG_BUDGET); // sertifika flight'ını küçük parçalara böl
     if (totalLen <= fragBudget) {
       // tek parça
       if (encrypted) await this.sendProtectedRecord(CONTENT_TYPE.HANDSHAKE, fullWire);
